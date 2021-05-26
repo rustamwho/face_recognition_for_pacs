@@ -5,7 +5,7 @@ A module for a face recognition-based access control and management system
 
 How to install (Windows 10):
   1. Install CMake for dlib (download https://cmake.org/download/).
- Don't forget to install componennts C++ lang with Build Tools для Visual Studio 2019 (https://visualstudio.microsoft.com/ru/downloads/#build-tools-for-visual-studio-2019) on Individual components tab:
+ Don't forget to install components C++ lang with Build Tools для Visual Studio 2019 (https://visualstudio.microsoft.com/ru/downloads/#build-tools-for-visual-studio-2019) on Individual components tab:
      a. Visual C++ Tools for Cmake (C++ CMake Tools for Windows)
      b. C++ Clang Compiler for Windows (11.0.0)
      c. Windows 10 SDK (10.0.19041.0)
@@ -13,3 +13,7 @@ How to install (Windows 10):
   2. Install OpenCV (pip3 install opencv-python)
   3. Install dlib (pip3 install dlib) 
   4. Install face_recognition (pip3 install face_recognition)
+
+To edit the design, use Qt Designer. After editing .the ui can be translated to .py using the command:
+    pyuic5 -x security_guard_gui.ui -o gui_on_python.py
+Don't forget to install pyqt5-tools for this.
