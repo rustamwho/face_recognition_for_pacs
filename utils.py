@@ -7,8 +7,7 @@ import face_recognition
 from numpy import ndarray
 from typing import Tuple, Union
 
-DIRECTORY_WITH_PHOTOS = 'C:/Dev/face_recognition_for_pacs/photos/'
-DIRECTORY_FOR_FACES = 'C:/Dev/face_recognition_for_pacs/face_images/'
+from constants import DIRECTORY_WITH_PHOTOS, DIRECTORY_FOR_FACES
 
 
 def save_data_as_pickle(data: dict):
@@ -75,13 +74,13 @@ def load_images_and_encoding() -> list[dict[str, Union[str, ndarray, bool]]]:
         known_persons.append(new_person)
     return known_persons
 
+
 def get_dict_of_valid_cams_id():
     """Возрващает список из id доступных видеокамер."""
-    # detect all connected webcams
     valid_cams = {}
-    for i in range(2):
+    for i in range(8):
         cap = cv2.VideoCapture(i)
-        if cap is None or not cap.isOpened():
+        if cap is None:
             print('Warning: unable to open video source: ', i)
         else:
             valid_cams[i] = cap
