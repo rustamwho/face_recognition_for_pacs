@@ -2,12 +2,28 @@ import os
 import cv2
 import numpy as np
 import face_recognition
+import dlib
 
 from utils import (save_data_as_pickle, load_data_from_pickle,
                    load_images_and_encoding)
 
+dlib.DLIB_USE_CUDA = True
 
-def update_data(known_persons):
+known_faces_encodings = None
+known_persons = None
+
+
+def load_data_for_recognition():
+    global known_faces_encodings,known_persons
+    if os.path.exists('known_peoples.pickle'):
+        known_persons = load_data_from_pickle()
+    else:
+        known_persons = load_images_and_encoding()
+    known_faces_encodings = update_data()
+
+
+def update_data():
+    global known_persons
     save_data_as_pickle(known_persons)
     known_faces_encodings = []
     for person in known_persons:
@@ -16,7 +32,7 @@ def update_data(known_persons):
 
 
 def main_loop(known_persons=[]):
-    video_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    video_capture = cv2.VideoCapture(1, cv2.CAP_DSHOW)
     known_faces_encodings = update_data(known_persons)
     while True:
         ret, frame = video_capture.read()
@@ -28,11 +44,11 @@ def main_loop(known_persons=[]):
         rgb_frame = frame[:, :, ::-1]
 
         face_location = face_recognition.face_locations(rgb_frame)
-        cv2.imshow('Video', rgb_frame)
+
         if not face_location:
             print('None face')
-
             continue
+
         face_encoding = face_recognition.face_encodings(rgb_frame,
                                                         face_location)[0]
 
@@ -57,6 +73,33 @@ def main_loop(known_persons=[]):
         if cv2.waitKey(1) & 0xFF == ord('q'):
             cv2.destroyAllWindows()
             break
+
+
+def recognition_employees(image):
+    global known_faces_encodings, known_persons
+    face_location = face_recognition.face_locations(image)
+
+    if not face_location:
+        print('None face')
+        return None
+
+    face_encoding = face_recognition.face_encodings(image,
+                                                    face_location)[0]
+
+    face_distances = face_recognition.face_distance(
+        known_faces_encodings, face_encoding)
+
+    best_match_index = np.argmin(face_distances)
+
+    if face_distances[best_match_index] < 0.60:
+        name_guest = known_persons[best_match_index]['name']
+        access = known_persons[best_match_index]['access']
+        image_path = known_persons[best_match_index]['face_path']
+        print(f'Guest: {name_guest}\n'
+              f'Access: {access}\n'
+              f'Image path: {image_path}')
+    else:
+        print('Unknown guest!')
 
 
 if __name__ == "__main__":
