@@ -3,6 +3,8 @@
 В окне показываются все проходящие люди с уровнями доступа
 """
 import sys
+import os
+import psutil
 
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QDialog, QMessageBox
@@ -11,12 +13,14 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QThread, QRect
 import cv2
 import numpy as np
+from multiprocessing import Process, Queue
+from datetime import datetime
 
 from gui_on_python import Ui_MainWindow
 from select_cam_gui_on_python import Ui_Dialog
 from utils import get_dict_of_valid_cams_id
-from constants import CAMS_OF_DOORS as CAMS
-from pacs import recognition_employees, load_data_for_recognition
+from constants import CAMS_OF_DOORS as CAMS, FRAMES_COUNT
+from pacs import RecognitionProcess
 
 
 class MainWindow(QMainWindow):
@@ -28,13 +32,21 @@ class MainWindow(QMainWindow):
 
         self.entry_videoThread = None
         self.exit_videoThread = None
+        self.recognized_personsThread = None
 
-        self.entry_recognitionThread = None
+        self.entry_input_queue = Queue(maxsize=5)
+        self.exit_input_queue = Queue(maxsize=5)
+
+        self.recognized_queue = Queue(maxsize=15)
+
+        self.entry_recognitionProcess = None
+        self.exit_recognitionProcess = None
 
         self.display_width = 556  # self.ui.entry_door_image_label.width()
         self.display_height = 529  # self.ui.exit_door_image_label.height()
 
         self.entry_frames_count = 0
+        self.exit_frames_count = 0
 
         self.add_functions()
 
@@ -52,6 +64,7 @@ class MainWindow(QMainWindow):
 
         # Получение списка доступных камер
         valid_cams = get_dict_of_valid_cams_id()
+        print(valid_cams)
         if not valid_cams:
             self.show_error('Не найдено камер для подключения.')
 
@@ -77,7 +90,16 @@ class MainWindow(QMainWindow):
             self.update_image_entry)
         self.entry_videoThread.error_read_cam_signal.connect(
             self.show_error)
-        self.entry_recognitionThread = RecognitionThread(door='entry')
+
+        self.entry_recognitionProcess = RecognitionProcess(
+            name='entry',
+            image_queue=self.entry_input_queue,
+            output_queue=self.recognized_queue,
+        )
+        self.recognized_personsThread = RecognisedThread(self.recognized_queue)
+        self.recognized_personsThread.change_logged_signal.connect(
+            self.update_last_logged
+        )
 
         if CAMS['entry'] != CAMS['exit']:
             self.exit_videoThread = VideoThread(cam_id=CAMS['exit'])
@@ -85,27 +107,65 @@ class MainWindow(QMainWindow):
                 self.update_image_exit)
             self.exit_videoThread.error_read_cam_signal.connect(
                 self.show_error)
+            self.exit_recognitionProcess = RecognitionProcess(
+                name='exit',
+                image_queue=self.exit_input_queue,
+                output_queue=self.recognized_queue
+            )
 
         self.entry_videoThread.start()
-        self.entry_recognitionThread.start()
+        self.entry_recognitionProcess.start()
+        self.recognized_personsThread.start()
         if self.exit_videoThread:
             self.exit_videoThread.start()
+            self.exit_recognitionProcess.start()
+
+    def put_entry_frame(self, frame):
+        if self.entry_input_queue.full():
+            self.entry_input_queue.get_nowait()
+        self.entry_input_queue.put(frame)
+
+    def put_exit_frame(self, frame):
+        if self.exit_input_queue.full():
+            self.exit_input_queue.get_nowait()
+        self.exit_input_queue.put(frame)
 
     @pyqtSlot(np.ndarray)
     def update_image_entry(self, cv_img):
         """Updates the image_label with a new opencv image"""
-        if self.entry_frames_count == 25:
-            self.entry_recognitionThread.detect_and_recognition_faces(cv_img)
+        if self.entry_frames_count == FRAMES_COUNT:
+            self.put_entry_frame(cv_img)
             self.entry_frames_count = 0
+
         self.entry_frames_count += 1
+
         qt_img = self.convert_cv_qt(cv_img)
         self.ui.entry_door_image_label.setPixmap(qt_img)
 
     @pyqtSlot(np.ndarray)
     def update_image_exit(self, cv_img):
         """Updates the image_label with a new opencv image"""
+        if self.exit_frames_count == FRAMES_COUNT:
+            self.put_exit_frame(cv_img)
+            self.exit_frames_count = 0
+
+        self.exit_frames_count += 1
+
         qt_img = self.convert_cv_qt(cv_img)
         self.ui.exit_door_image_label.setPixmap(qt_img)
+
+    def update_last_logged(self, door, name, image_path, access):
+        qt_img = self.convert_cv_qt(cv2.imread(image_path))
+        time = datetime.now().strftime("%H:%M:%S")
+        if door == 'entry':
+            self.ui.logged_in_image_label.setPixmap(qt_img)
+            self.ui.logged_in_name_label.setText(name)
+            self.ui.logged_in_time_label.setText(time)
+            self.ui.logged_in_access_label.setText(str(access))
+        if door == 'exit':
+            self.ui.logged_out_image_label.setPixmap(qt_img)
+            self.ui.logged_out_name_label.setText(name)
+            self.ui.logged_out_time_label.setText(time)
 
     def convert_cv_qt(self, cv_img):
         """Конвертация OpenCV Image в QPixmap"""
@@ -130,6 +190,19 @@ class MainWindow(QMainWindow):
             self.entry_videoThread.close_thread()
         if self.exit_videoThread:
             self.exit_videoThread.close_thread()
+        if self.entry_recognitionProcess:
+            self.entry_recognitionProcess.stop_process()
+        if self.exit_recognitionProcess:
+            self.exit_recognitionProcess.stop_process()
+
+    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        super(QMainWindow,self).closeEvent(a0)
+
+        # Принудительное завершение всех дочерних процессов
+        me = psutil.Process(os.getpid())
+        for child in me.children():
+            child.kill()
+        self.close_threads()
 
 
 class VideoThread(QThread):
@@ -163,14 +236,32 @@ class VideoThread(QThread):
         self.quit()
 
 
-class RecognitionThread(QThread):
-    def __init__(self, door: str = 'entry'):
-        super(RecognitionThread, self).__init__()
+class RecognisedThread(QThread):
+    def __init__(self, logged_in_queue):
+        super(RecognisedThread, self).__init__()
 
-        load_data_for_recognition()
+        self.logged_in_queue = logged_in_queue
+        self.is_work = True
 
-    def detect_and_recognition_faces(self, image):
-        recognition_employees(image)
+    change_logged_signal = pyqtSignal(str, str, str, bool)
+
+    def run(self):
+        while self.is_work:
+            if not self.logged_in_queue.empty():
+                person = self.logged_in_queue.get()
+                self.change_logged_signal.emit(
+                    person['door'],
+                    person['name'],
+                    person['image_path'],
+                    person['access']
+                )
+
+        self.close_thread()
+
+    def close_thread(self):
+        """Завершение потока."""
+        self.is_work = False
+        self.quit()
 
 
 class DialogSetCam(QtWidgets.QDialog):
@@ -198,11 +289,6 @@ def application():
     """Отрисовка окна"""
     app = QtWidgets.QApplication(sys.argv)
     mainWindow = MainWindow()
-    """MainWindow = QtWidgets.QMainWindow()
-    ui = Ui_MainWindow()
-    ui.setupUi(MainWindow)
-
-    add_functions(ui)"""
 
     mainWindow.show()
     sys.exit(app.exec_())
