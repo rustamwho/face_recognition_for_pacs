@@ -5,3 +5,5 @@ CAMS_OF_DOORS = {
     'entry': 0,
     'exit': 0,
 }
+
+FRAMES_COUNT = 50
