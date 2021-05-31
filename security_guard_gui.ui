@@ -322,7 +322,7 @@
      <string>Время:</string>
     </property>
    </widget>
-   <widget class="QLabel" name="logged_in_image_label_2">
+   <widget class="QLabel" name="logged_out_image_label">
     <property name="geometry">
      <rect>
       <x>1460</x>
