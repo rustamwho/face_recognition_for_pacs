@@ -80,7 +80,7 @@ def get_dict_of_valid_cams_id():
     valid_cams = {}
     for i in range(8):
         cap = cv2.VideoCapture(i)
-        if cap is None:
+        if cap is None or not cap.isOpened():
             print('Warning: unable to open video source: ', i)
         else:
             valid_cams[i] = cap
