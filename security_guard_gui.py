@@ -19,7 +19,7 @@ from datetime import datetime
 from gui_on_python import Ui_MainWindow
 from select_cam_gui_on_python import Ui_Dialog
 from utils import get_dict_of_valid_cams_id
-from constants import CAMS_OF_DOORS as CAMS, FRAMES_COUNT
+from settings import CAMS_OF_DOORS as CAMS, FRAMES_COUNT
 from pacs import RecognitionProcess
 
 
@@ -120,18 +120,18 @@ class MainWindow(QMainWindow):
             self.exit_videoThread.start()
             self.exit_recognitionProcess.start()
 
-    def put_entry_frame(self, frame):
+    def put_entry_frame(self, frame: np.ndarray) -> None:
         if self.entry_input_queue.full():
             self.entry_input_queue.get_nowait()
         self.entry_input_queue.put(frame)
 
-    def put_exit_frame(self, frame):
+    def put_exit_frame(self, frame: np.ndarray) -> None:
         if self.exit_input_queue.full():
             self.exit_input_queue.get_nowait()
         self.exit_input_queue.put(frame)
 
     @pyqtSlot(np.ndarray)
-    def update_image_entry(self, cv_img):
+    def update_image_entry(self, cv_img: np.ndarray) -> None:
         """Updates the image_label with a new opencv image"""
         if self.entry_frames_count == FRAMES_COUNT:
             self.put_entry_frame(cv_img)
@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
         self.ui.entry_door_image_label.setPixmap(qt_img)
 
     @pyqtSlot(np.ndarray)
-    def update_image_exit(self, cv_img):
+    def update_image_exit(self, cv_img: np.ndarray) -> None:
         """Updates the image_label with a new opencv image"""
         if self.exit_frames_count == FRAMES_COUNT:
             self.put_exit_frame(cv_img)
@@ -154,7 +154,9 @@ class MainWindow(QMainWindow):
         qt_img = self.convert_cv_qt(cv_img)
         self.ui.exit_door_image_label.setPixmap(qt_img)
 
-    def update_last_logged(self, door, name, image_path, access):
+    def update_last_logged(self, door: str, name: str, image_path: str,
+                           access: bool) -> None:
+        """Отображение распознанных лиц на главном окне."""
         qt_img = self.convert_cv_qt(cv2.imread(image_path))
         time = datetime.now().strftime("%H:%M:%S")
         if door == 'entry':
@@ -167,7 +169,7 @@ class MainWindow(QMainWindow):
             self.ui.logged_out_name_label.setText(name)
             self.ui.logged_out_time_label.setText(time)
 
-    def convert_cv_qt(self, cv_img):
+    def convert_cv_qt(self, cv_img: np.ndarray) -> QPixmap:
         """Конвертация OpenCV Image в QPixmap"""
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
@@ -180,12 +182,12 @@ class MainWindow(QMainWindow):
                                         Qt.KeepAspectRatio)
         return QPixmap.fromImage(p)
 
-    def show_error(self, text):
+    def show_error(self, text: str) -> None:
         """Вывод ошибки при подключении к камере."""
         QMessageBox.critical(self, "Ошибка ", text, QMessageBox.Ok)
 
-    def close_threads(self):
-        """Завершение выполнения потоков воспроизведения видео."""
+    def close_threads(self) -> None:
+        """Завершение выполнения потоков воспроизведения видео и процессов."""
         if self.entry_videoThread:
             self.entry_videoThread.close_thread()
         if self.exit_videoThread:
@@ -196,7 +198,7 @@ class MainWindow(QMainWindow):
             self.exit_recognitionProcess.stop_process()
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
-        super(QMainWindow,self).closeEvent(a0)
+        super(QMainWindow, self).closeEvent(a0)
 
         # Принудительное завершение всех дочерних процессов
         me = psutil.Process(os.getpid())
@@ -237,6 +239,12 @@ class VideoThread(QThread):
 
 
 class RecognisedThread(QThread):
+    """
+    Поток для отслеживания результатов распознования.
+    Как только в выходной очереди процессов распознования появляется результат,
+    подается сигнал на отображение родительскому потоку.
+    """
+
     def __init__(self, logged_in_queue):
         super(RecognisedThread, self).__init__()
 
@@ -248,12 +256,14 @@ class RecognisedThread(QThread):
     def run(self):
         while self.is_work:
             if not self.logged_in_queue.empty():
-                person = self.logged_in_queue.get()
+                logged_event = self.logged_in_queue.get()
+                door = logged_event['door']
+                person = logged_event['person']
                 self.change_logged_signal.emit(
-                    person['door'],
-                    person['name'],
-                    person['image_path'],
-                    person['access']
+                    door,
+                    person.name,
+                    person.image_path,
+                    person.access
                 )
 
         self.close_thread()

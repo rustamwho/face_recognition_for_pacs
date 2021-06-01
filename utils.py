@@ -7,10 +7,11 @@ import face_recognition
 from numpy import ndarray
 from typing import Tuple, Union
 
-from constants import DIRECTORY_WITH_PHOTOS, DIRECTORY_FOR_FACES
+from required_classes import Person
+from settings import DIRECTORY_WITH_PHOTOS, DIRECTORY_FOR_FACES
 
 
-def save_data_as_pickle(data: dict):
+def save_data_as_pickle(data: list[Person]):
     """Запись базы известных лиц на диск в формате pickle."""
     with open('known_peoples.pickle', 'wb') as peoples_db:
         pickle.dump(data, peoples_db, protocol=pickle.HIGHEST_PROTOCOL)
@@ -21,8 +22,11 @@ def load_data_from_pickle() -> list:
     """Чтение базы известных лиц из диска в формате pickle."""
     with open('known_peoples.pickle', 'rb') as peoples_db:
         data = pickle.load(peoples_db)
+
+    known_persons = [person for person in data]
+
     print('Known faces was loaded successfully.')
-    return data
+    return known_persons
 
 
 def save_data_as_json(data):
@@ -47,7 +51,7 @@ def save_face_image(name: str, image: numpy.ndarray):
     return file_name
 
 
-def load_images_and_encoding() -> list[dict[str, Union[str, ndarray, bool]]]:
+def load_images_and_encoding() -> list[Person]:
     """Распознование и сохранение лиц по фотографиям в директории."""
     known_persons = []
     for photo in os.listdir(DIRECTORY_WITH_PHOTOS):
@@ -65,12 +69,10 @@ def load_images_and_encoding() -> list[dict[str, Union[str, ndarray, bool]]]:
 
         face_encoding = face_recognition.face_encodings(image_rgb)[0]
         access = True
-        new_person = {
-            'name': person_name,
-            'face_encoding': face_encoding,
-            'access': access,
-            'face_path': face_path
-        }
+        new_person = Person(name=person_name,
+                            face_encoding=face_encoding,
+                            image_path=face_path,
+                            access=access)
         known_persons.append(new_person)
     return known_persons
 

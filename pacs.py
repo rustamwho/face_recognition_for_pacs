@@ -7,15 +7,9 @@ from multiprocessing import Process, Queue
 
 from utils import (save_data_as_pickle, load_data_from_pickle,
                    load_images_and_encoding)
+from required_classes import Person
 
 dlib.DLIB_USE_CUDA = True
-
-
-class Person():
-    def __init__(self, name, image_path, access):
-        self.name = name
-        self.image_path = image_path
-        self.access = access
 
 
 class RecognitionProcess(Process):
@@ -23,12 +17,11 @@ class RecognitionProcess(Process):
         Process.__init__(self)
         self.name = name
         self.image_queue = image_queue
-        self.is_work = True
-        self.known_faces_encodings = None
-        self.known_persons = None
         self.output_queue = output_queue
+        self.is_work = True
 
-        self.load_data_for_recognition()
+        self.known_persons = self.load_data_for_recognition()
+        self.known_faces_encodings = self.update_data()
 
     def get_image(self):
         if not self.image_queue.empty():
@@ -47,16 +40,14 @@ class RecognitionProcess(Process):
 
     def load_data_for_recognition(self):
         if os.path.exists('known_peoples.pickle'):
-            self.known_persons = load_data_from_pickle()
+            return load_data_from_pickle()
         else:
-            self.known_persons = load_images_and_encoding()
-        self.update_data()
+            return load_images_and_encoding()
 
     def update_data(self):
         save_data_as_pickle(self.known_persons)
-        self.known_faces_encodings = []
-        for person in self.known_persons:
-            self.known_faces_encodings.append(person['face_encoding'])
+
+        return [person.face_encoding for person in self.known_persons]
 
     def recognition_employees(self, image):
         face_location = face_recognition.face_locations(image)
@@ -74,16 +65,12 @@ class RecognitionProcess(Process):
         best_match_index = np.argmin(face_distances)
 
         if face_distances[best_match_index] < 0.60:
-            name_guest = self.known_persons[best_match_index]['name']
-            access = self.known_persons[best_match_index]['access']
-            image_path = self.known_persons[best_match_index]['face_path']
-            print(f'Guest: {name_guest}\n'
-                  f'Access: {access}\n'
-                  f'Image path: {image_path}')
+            recognized_person = self.known_persons[best_match_index]
+            print(f'Guest: {recognized_person.name}\n'
+                  f'Access: {recognized_person.access}\n'
+                  f'Image path: {recognized_person.image_path}')
             self.output_queue.put({'door': self.name,
-                                   'name': name_guest,
-                                   'access': access,
-                                   'image_path': image_path})
+                                   'person': recognized_person})
         else:
             print('Unknown guest!')
 
@@ -95,4 +82,4 @@ if __name__ == "__main__":
         known_persons = load_data_from_pickle()
     else:
         known_persons = load_images_and_encoding()
-    main_loop(known_persons)
+    # main_loop(known_persons)
