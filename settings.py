@@ -8,14 +8,18 @@ DIRECTORY_FOR_FACES = 'C:/Dev/face_recognition_for_pacs/face_images/'
 
 CAMS_OF_DOORS = {
     'entry': 0,
-    'exit': 0,
+    'exit': 1,
 }
 
 FRAMES_COUNT = 50
+
+THRESHOLD = 0.6
 
 DATABASES_SERVER = {
     'host': '127.0.0.1',
     'port': '5432',
     'user': os.getenv('POSTGRE_USERNAME'),
-    'password': os.getenv('POSTGRE_PASS')
+    'password': os.getenv('POSTGRE_PASSWORD')
 }
+
+DATABASE_NAME = 'acms'
