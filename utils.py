@@ -59,6 +59,8 @@ def save_face_image(name: str, image: numpy.ndarray):
 def load_images_and_encoding() -> list[Person]:
     """Распознование и сохранение лиц по фотографиям в директории."""
     known_persons = []
+    connection = get_connection_to_db()
+
     for photo in os.listdir(DIRECTORY_WITH_PHOTOS):
         image_rgb = face_recognition.load_image_file(
             DIRECTORY_WITH_PHOTOS + photo)
@@ -79,11 +81,14 @@ def load_images_and_encoding() -> list[Person]:
                             face_encoding=face_encoding,
                             image_path=face_path,
                             access=access)
-        res = add_employee_to_db(new_person)
+
+        res = add_employee_to_db(connection, new_person)
 
         print(f'Сотрудник {person_name} добавлен в базу.')
 
         known_persons.append(new_person)
+
+    connection.close()
     return known_persons
 
 
@@ -150,7 +155,7 @@ def tables_exists_or_create() -> bool:
     :param connection: Объект подключения к базе данных
     :return: True if tables exists or created, False if have a problem
     """
-    with get_connection_to_db() as connection:
+    with get_connection() as connection:
         try:
             cursor = connection.cursor()
 
@@ -205,7 +210,7 @@ def create_connection_pool_to_db():
     return False
 
 
-def get_connection():
+def get_connection_to_db():
     """Получение подключения к базе данных."""
     connection_to_db = psycopg2.connect(host=DATABASES_SERVER['host'],
                                         port=DATABASES_SERVER['port'],
@@ -213,16 +218,16 @@ def get_connection():
                                         password=DATABASES_SERVER[
                                             'password'],
                                         database=DATABASE_NAME)
+    connection_to_db.autocommit = True
     return connection_to_db
 
 
 @contextmanager
-def get_connection_to_db() -> psycopg2.extensions.connection:
+def get_connection() -> psycopg2.extensions.connection:
     """
     Получение подключения к базе данных из пула.
     :return: Connection object to the database.
     """
-
     connection = db_connection_pool.getconn()
     try:
         yield connection
@@ -232,14 +237,14 @@ def get_connection_to_db() -> psycopg2.extensions.connection:
         db_connection_pool.putconn(connection)
 
 
-def add_employee_to_db(employee: Person):
-    with get_connection_to_db() as connection:
-        try:
-            cursor = connection.cursor()
-            v_low = ','.join(str(s) for s in employee.face_encoding[0:64])
-            v_high = ','.join(str(s) for s in employee.face_encoding[64:128])
-            name, surname = employee.name.split()
-            query = f'''
+def add_employee_to_db(connection: psycopg2.extensions.connection,
+                       employee: Person):
+    try:
+        cursor = connection.cursor()
+        v_low = ','.join(str(s) for s in employee.face_encoding[0:64])
+        v_high = ','.join(str(s) for s in employee.face_encoding[64:128])
+        name, surname = employee.name.split()
+        query = f'''
                 INSERT INTO employees(
                     first_name, last_name, image_path, access, vec_low,vec_high
                     ) VALUES (
@@ -251,32 +256,34 @@ def add_employee_to_db(employee: Person):
                     CUBE(array[{v_high}])
                     ) ON CONFLICT DO NOTHING;
             '''
-            cursor.execute(query)
-            cursor.close()
-            connection.commit()
-            return True
-        except (Exception, Error) as error:
-            print('Ошибка при добавлении пользователя в базу:', error)
-            connection.rollback()
-            return False
+        cursor.execute(query)
+        cursor.close()
+        return True
+    except (Exception, Error) as error:
+        print('Ошибка при добавлении пользователя в базу:', error)
+        connection.rollback()
+        return False
 
 
-def load_data_from_db()->list[Person]:
+def load_data_from_db() -> Union[list[Person], bool]:
     """Чтение базы данных сотрудников из PostgreSQL."""
     known_persons = []
-    connection = get_connection()
+    connection = get_connection_to_db()
     try:
         cursor = connection.cursor()
         query = 'select * from employees'
         cursor.execute(query)
         for employee in cursor.fetchall():
             id = employee[0]
-            name = employee[1]+' '+employee[2]
+            name = employee[1] + ' ' + employee[2]
             image_path = employee[3]
             access = employee[4]
-            encoding_str = employee[5][1:-1]+', '+employee[6][1:-1]
-            encodings = numpy.fromstring(encoding_str,dtype=numpy.float64,sep=',')
+            # vec_low + vec_high
+            encoding_str = employee[5][1:-1] + ', ' + employee[6][1:-1]
+            encodings = numpy.fromstring(encoding_str, dtype=numpy.float64,
+                                         sep=',')
             new_person = Person(
+                id=id,
                 name=name,
                 image_path=image_path,
                 access=access,
@@ -294,19 +301,56 @@ def load_data_from_db()->list[Person]:
         return False
 
 
-def recognise_employee(encodings):
-    with get_connection_to_db() as connection:
-        cursor = connection.cursor()
-        query = "SELECT first_name, last_name FROM employees WHERE sqrt(power(CUBE(array[{}]) <-> vec_low, 2) + power(CUBE(array[{}]) <-> vec_high, 2)) <= {} ".format(
+def recognise_employee_sql(connection: psycopg2.extensions.connection,
+                           encodings):
+    """Распознавание сотрудника sql-запросом"""
+    cursor = connection.cursor()
+    try:
+        query = '''
+                SELECT first_name, last_name FROM employees 
+                WHERE sqrt( power( CUBE( array[{}]) <-> vec_low, 2) + 
+                power( CUBE( array[{}]) <-> vec_high, 2)) <= {} 
+                '''.format(
             ','.join(str(s) for s in encodings[0:64]),
-            ','.join(str(s) for s in encodings[0][64:128]),
+            ','.join(str(s) for s in encodings[64:128]),
             THRESHOLD,
         ) + \
-                "ORDER BY sqrt(power(CUBE(array[{}]) <-> vec_low, 2) + power(CUBE(array[{}]) <-> vec_high, 2)) <-> vec_high) ASC LIMIT 1".format(
+                '''
+            ORDER BY sqrt( power( CUBE( array[{}]) <-> vec_low, 2) + 
+            power( CUBE( array[{}]) <-> vec_high, 2)) ASC LIMIT 1'''.format(
                     ','.join(str(s) for s in encodings[0:64]),
                     ','.join(str(s) for s in encodings[64:128]),
                 )
-        print(cursor.query(query))
+        cursor.execute(query)
+        print(cursor.fetchall())
+    except (Exception, Error) as error:
+        print('Ошибка при запросе к БД:', error)
+        connection.rollback()
+        return False
+
+
+def update_employees_in_bd(connection: psycopg2.extensions.connection,
+                           data: list[Person]) -> bool:
+    try:
+        cursor = connection.cursor()
+
+        sql_get_employees_id = 'select id from employees'
+        cursor.execute(sql_get_employees_id)
+        ids_in_db = tuple(row[0] for row in cursor.fetchall())
+
+        cursor.close()
+
+        for person in data:
+            if person.id not in ids_in_db:
+                add_employee_to_db(connection, person)
+
+    except (Exception, Error) as error:
+        print('Ошибка при обновлении базы:', error)
+        connection.rollback()
+        return False
+    finally:
+        print('База обовлена.')
+        return True
 
 
 if __name__ == '__main__':
