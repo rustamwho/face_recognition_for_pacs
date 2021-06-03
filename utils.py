@@ -249,7 +249,7 @@ def add_employee_to_db(employee: Person):
                     '{employee.access}',
                     CUBE(array[{v_low}]),
                     CUBE(array[{v_high}])
-                    )
+                    ) ON CONFLICT DO NOTHING;
             '''
             cursor.execute(query)
             cursor.close()
